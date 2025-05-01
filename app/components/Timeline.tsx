@@ -13,10 +13,12 @@ import { Slider } from "@/components/ui/slider";
 import { formatTime } from '../lib/utils';
 import { cn } from '@/lib/utils';
 import { MediaTrackItem } from '../types/effects';
-import { ChevronRight, ChevronLeft, Trash2, Plus, Scissors, Combine } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Trash2, Plus, Scissors, Combine, Flag, MapPin, BookmarkPlus } from 'lucide-react';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Toast } from '@/components/ui/toast';
 import { v4 as uuidv4 } from 'uuid';
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 
 
 const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -151,9 +153,9 @@ export default function Timeline() {
 
   // Update the tracks to include the items property
   const [tracks, setTracks] = useState<Track[]>([
-    { id: 'video-track-1', type: 'video', items: [], duration: 60, name: 'Video 1' },
-    { id: 'audio-track-1', type: 'audio', items: [], duration: 60, name: 'Audio 1' },
-    { id: 'image-track-1', type: 'image', items: [], duration: 60, name: 'Image 1' },
+    { id: 'video-track-1', type: 'video', items: [], duration: currentVideo.duration || 60, name: 'Video 1' },
+    { id: 'audio-track-1', type: 'audio', items: [], duration: currentVideo.duration || 60, name: 'Audio 1' },
+    { id: 'image-track-1', type: 'image', items: [], duration: currentVideo.duration || 60, name: 'Image 1' },
   ]);
 
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
@@ -170,6 +172,16 @@ export default function Timeline() {
     );
     showToast('Updated media item', 'success');
   };
+
+  // Add this useEffect to update the track durations when the video duration changes
+  useEffect(() => {
+    if (currentVideo.duration) {
+      setTracks(prevTracks => prevTracks.map(track => ({
+        ...track,
+        duration: Math.max(track.duration, currentVideo.duration || 60)
+      })));
+    }
+  }, [currentVideo.duration]);
 
   // Handle dropping media onto tracks
   const handleTrackDrop = (item: MediaTrackItem, trackIndex: number) => {
@@ -190,7 +202,7 @@ export default function Timeline() {
           return {
             ...track,
             items: [...track.items, item],
-            duration: Math.max(track.duration, item.startTime + item.duration)
+            duration: Math.max(track.duration, item.startTime + item.duration, currentVideo.duration || 60)
           };
         }
         return track;
@@ -244,7 +256,7 @@ export default function Timeline() {
     showToast('Removed media item', 'success');
   };
 
-  // Synchronize tracks with media items
+  // Update the synchronize tracks function to use actual video duration
   useEffect(() => {
     console.log("Synchronizing tracks with media items:", mediaItems);
     
@@ -262,12 +274,14 @@ export default function Timeline() {
       return acc;
     }, {} as Record<'video' | 'audio' | 'image', MediaTrackItem[]>);
     
-    // Update each track with its corresponding items
+    // Update each track with its corresponding items and use actual video duration
+    const videoDuration = currentVideo.duration || 60;
+    
     const updatedTracks = tracks.map(track => {
       const trackItems = itemsByType[track.type] || [];
       const maxDuration = trackItems.length > 0
-        ? Math.max(...trackItems.map(item => item.startTime + item.duration), 60)
-        : 60; // Default minimum duration
+        ? Math.max(...trackItems.map(item => item.startTime + item.duration), videoDuration)
+        : videoDuration; // Use video duration as minimum
       
       return {
         ...track,
@@ -296,7 +310,7 @@ export default function Timeline() {
       console.log("Updating tracks with new media items:", updatedTracks);
       setTracks(updatedTracks);
     }
-  }, [mediaItems]);
+  }, [mediaItems, currentVideo.duration]);
 
   // Distribute media items to tracks based on their type
   const updateTracks = () => {
@@ -439,13 +453,13 @@ export default function Timeline() {
     
     wavesurferRef.current.zoom(pxPerSec);
     
-    // Update visible time range based on zoom level
+    // Update visible time range based on zoom level and actual video duration
     const containerWidth = timelineRef.current?.clientWidth || 0;
     const visibleDuration = containerWidth / pxPerSec;
     const currentCenter = currentTime;
     
     const start = Math.max(0, currentCenter - visibleDuration / 2);
-    const end = Math.min(currentVideo.duration, currentCenter + visibleDuration / 2);
+    const end = Math.min(currentVideo.duration || 60, currentCenter + visibleDuration / 2);
     
     setVisibleTimeRange({ start, end });
   }, [isWaveformReady, currentTime, currentVideo.duration]);
@@ -507,6 +521,94 @@ export default function Timeline() {
   const handleTrimDragEnd = () => {
     setIsDraggingTrim(null);
     dispatch(setTrimPoints({ start: localTrimStart, end: localTrimEnd }));
+  };
+
+  // eslint-disable-next-line no-redeclare
+  const goToNextMarker = useCallback(() => {
+    if (!markers.length || currentTime >= Math.max(...markers.map(m => m.time))) return;
+    
+    // Find next marker after current time
+    const nextMarkers = markers
+      .filter(marker => marker.time > currentTime)
+      .sort((a, b) => a.time - b.time);
+    
+    if (nextMarkers.length > 0) {
+      const nextMarker = nextMarkers[0];
+      if (videoRef.current) {
+        videoRef.current.currentTime = nextMarker.time;
+      }
+      dispatch(updateCurrentTime(nextMarker.time));
+      setSelectedMarker(nextMarker.id);
+      showToast(`Jumped to marker: ${nextMarker.label || formatTime(nextMarker.time)}`, 'success');
+    }
+  }, [markers, currentTime, videoRef, dispatch]);
+  
+  // eslint-disable-next-line no-redeclare
+  const goToPrevMarker = useCallback(() => {
+    if (!markers.length || currentTime <= Math.min(...markers.map(m => m.time))) return;
+    
+    // Find previous marker before current time
+    const prevMarkers = markers
+      .filter(marker => marker.time < currentTime)
+      .sort((a, b) => b.time - a.time); // Sort descending
+    
+    if (prevMarkers.length > 0) {
+      const prevMarker = prevMarkers[0];
+      if (videoRef.current) {
+        videoRef.current.currentTime = prevMarker.time;
+      }
+      dispatch(updateCurrentTime(prevMarker.time));
+      setSelectedMarker(prevMarker.id);
+      showToast(`Jumped to marker: ${prevMarker.label || formatTime(prevMarker.time)}`, 'success');
+    }
+  }, [markers, currentTime, videoRef, dispatch]);
+  
+  // eslint-disable-next-line no-redeclare
+  const exportMarkers = useCallback(() => {
+    if (!markers.length) {
+      showToast('No markers to export', 'error');
+      return;
+    }
+    
+    // Sort markers by time
+    const sortedMarkers = [...markers].sort((a, b) => a.time - b.time);
+    
+    // Create a formatted string for chapters
+    let chaptersText = "WEBVTT\n\n";
+    
+    sortedMarkers.forEach((marker, index) => {
+      const startTime = formatVTTTime(marker.time);
+      const endTime = index < sortedMarkers.length - 1 
+        ? formatVTTTime(sortedMarkers[index + 1].time - 0.001) 
+        : formatVTTTime(currentVideo.duration || 600);
+      
+      chaptersText += `${index + 1}\n`;
+      chaptersText += `${startTime} --> ${endTime}\n`;
+      chaptersText += `${marker.label || `Chapter ${index + 1}`}\n\n`;
+    });
+    
+    // Create and download the file
+    const blob = new Blob([chaptersText], { type: 'text/vtt' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'chapters.vtt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showToast('Chapters exported successfully as VTT file', 'success');
+  }, [markers, currentVideo.duration]);
+  
+  // eslint-disable-next-line no-redeclare
+  const formatVTTTime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const ms = Math.round((seconds % 1) * 1000);
+    
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
   };
 
   // Add mouse event listeners for trim dragging
@@ -590,18 +692,6 @@ export default function Timeline() {
             dispatch(updateCurrentTime(newTime));
           }
           break;
-        case 's': // Split at current time
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            handleSplit();
-          }
-          break;
-        case 'm': // Merge selected items
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            handleMerge();
-          }
-          break;
         case 'delete':
         case 'backspace':
           e.preventDefault();
@@ -617,12 +707,18 @@ export default function Timeline() {
         case '3':
           setScale(2); // 2x zoom out
           break;
+        case 'm': // Add marker at current time
+          if (!(e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            addMarker(currentTime, 'scene');
+          }
+          break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentVideo.url, currentTime, videoElement, selectedItems]);
+  }, [currentVideo.url, currentTime, videoElement, selectedItems, markers, goToNextMarker, goToPrevMarker]);
 
   // Preview mode logic
   useEffect(() => {
@@ -718,31 +814,47 @@ export default function Timeline() {
 
   // Render markers component
   const TimelineMarkers = React.memo(() => (
-    <div className="relative h-8 bg-gray-800/30">
-      {markers.map(marker => (
-        <div
-          key={marker.id}
-          className={cn(
-            "absolute top-0 bottom-0 w-0.5 cursor-move",
-            marker.type === 'scene' ? "bg-blue-500" : 
-            marker.type === 'cut' ? "bg-red-500" : "bg-yellow-500",
-            selectedMarker === marker.id && "shadow-lg scale-125"
-          )}
-          style={{ 
-            left: `${(marker.time / currentVideo.duration) * 100}%`,
-            transform: 'translateX(-50%)'
-          }}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            setSelectedMarker(marker.id);
-            setIsDraggingMarker(true);
-          }}
-        >
-          <div className="absolute bottom-full mb-1 transform -translate-x-1/2 text-xs text-gray-300 whitespace-nowrap">
-            {marker.label}
+    <div className="relative h-12 bg-gray-800/30 border-b border-gray-700/50 mb-2">
+      <div className="absolute left-0 top-0 bottom-0 w-12 bg-gray-900/50 border-r border-gray-700/50 flex items-center justify-center">
+        <span className="text-xs font-medium text-gray-400">Markers</span>
+      </div>
+      <div className="absolute left-12 right-0 h-full">
+        {markers.map(marker => (
+          <div
+            key={marker.id}
+            className={cn(
+              "absolute top-0 bottom-0 w-1 cursor-pointer group",
+              marker.type === 'scene' ? "bg-blue-500" : 
+              marker.type === 'cut' ? "bg-red-500" : "bg-yellow-500",
+              selectedMarker === marker.id && "shadow-lg w-1.5"
+            )}
+            style={{ 
+              left: `${(marker.time / (currentVideo.duration || 60)) * 100}%`,
+              transform: 'translateX(-50%)'
+            }}
+            onClick={() => setSelectedMarker(marker.id)}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setSelectedMarker(marker.id);
+              setIsDraggingMarker(true);
+            }}
+          >
+            <div className={cn(
+              "absolute top-1 transform -translate-x-1/2 text-xs text-white px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity",
+              marker.type === 'scene' ? "bg-blue-600" : 
+              marker.type === 'cut' ? "bg-red-600" : "bg-yellow-600",
+              selectedMarker === marker.id && "opacity-100"
+            )}>
+              {marker.label || formatTime(marker.time)}
+            </div>
+            <div className={cn(
+              "absolute bottom-0 h-3 w-3 rounded-full transform -translate-x-1 border border-white",
+              marker.type === 'scene' ? "bg-blue-500" : 
+              marker.type === 'cut' ? "bg-red-500" : "bg-yellow-500"
+            )}/>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   ));
 
@@ -1194,8 +1306,8 @@ export default function Timeline() {
           
           {/* Render media items */}
           {track.items.length > 0 && track.items.map((item) => {
-            // Use currentVideo duration to ensure consistent scale
-            const maxDuration = Math.max(currentVideo.duration || 60, 60);
+            // Use actual video duration instead of a fixed value
+            const maxDuration = currentVideo.duration || 60;
             
             // Calculate positions as percentage of timeline width
             const leftPos = (item.startTime / maxDuration) * 100;
@@ -1236,13 +1348,20 @@ export default function Timeline() {
 
   // Improve time ruler visibility
   const renderTimeRuler = () => {
-    const duration = 300; // 5 minutes in seconds
+    const duration = currentVideo.duration || 60; // Use actual video duration
     const markers = [];
-    const step = 5; // 5 second intervals
+    
+    // Adjust step size based on duration to avoid too many markers
+    let step = 1; // 1 second intervals for shorter videos
+    if (duration > 60) step = 5; // 5 seconds for medium videos
+    if (duration > 300) step = 30; // 30 seconds for longer videos
+    
+    // Determine major marker frequency based on step size
+    const majorStep = step * 5;
 
     for (let time = 0; time <= duration; time += step) {
       const position = (time / duration) * 100;
-      const isMajorMarker = time % 30 === 0; // Major marker every 30 seconds
+      const isMajorMarker = time % majorStep === 0; // Major marker at appropriate intervals
       
       markers.push(
         <div
@@ -1269,9 +1388,9 @@ export default function Timeline() {
     );
   };
 
-  // Playhead
+  // Update the playhead to use actual video duration
   const renderPlayhead = () => {
-    const position = (currentTime / scale) * 100;
+    const position = (currentTime / (currentVideo.duration || 60)) * 100;
     return (
       <div
         className="absolute top-0 bottom-0 w-px bg-red-500 z-10"
@@ -1283,95 +1402,6 @@ export default function Timeline() {
   };
 
   const getTimeScale = () => PIXELS_PER_SECOND * scale;
-
-  // Add split functionality
-  const handleSplit = () => {
-    if (!selectedItems.length) return;
-
-    selectedItems.forEach(itemId => {
-      const item = mediaItems.find(i => i.id === itemId);
-      if (!item) return;
-
-      if (currentTime > item.startTime && currentTime < item.startTime + item.duration) {
-        // Create two new items from the split
-        const firstHalf: MediaTrackItem = {
-          ...item,
-          id: crypto.randomUUID(),
-          duration: currentTime - item.startTime
-        };
-
-        const secondHalf: MediaTrackItem = {
-          ...item,
-          id: crypto.randomUUID(),
-          startTime: currentTime,
-          duration: (item.startTime + item.duration) - currentTime
-        };
-
-        // Remove original and add new items
-        dispatch(removeMediaItem(item.id));
-        dispatch(updateMediaItem({
-          itemId: firstHalf.id,
-          updates: {
-            startTime: firstHalf.startTime,
-            duration: firstHalf.duration,
-            track: item.track
-          }
-        }));
-        dispatch(updateMediaItem({
-          itemId: secondHalf.id,
-          updates: {
-            startTime: secondHalf.startTime,
-            duration: secondHalf.duration,
-            track: item.track
-          }
-        }));
-      }
-    });
-  };
-
-  // Add merge functionality
-  const handleMerge = () => {
-    if (selectedItems.length < 2) return;
-
-    // Sort selected items by start time
-    const itemsToMerge = selectedItems
-      .map(id => mediaItems.find(i => i.id === id))
-      .filter((item): item is MediaTrackItem => !!item)
-      .sort((a, b) => a.startTime - b.startTime);
-
-    // Check if items are adjacent and of the same type
-    const canMerge = itemsToMerge.every((item, i) => {
-      if (i === 0) return true;
-      const prevItem = itemsToMerge[i - 1];
-      return (
-        item.type === prevItem.type &&
-        Math.abs((prevItem.startTime + prevItem.duration) - item.startTime) < 0.1
-      );
-    });
-
-    if (!canMerge) {
-      showToast("Can only merge adjacent items of the same type", "error");
-      return;
-    }
-
-    // Create merged item
-    const mergedItem: MediaTrackItem = {
-      ...itemsToMerge[0],
-      id: crypto.randomUUID(),
-      duration: itemsToMerge.reduce((total, item) => total + item.duration, 0)
-    };
-
-    // Remove original items and add merged item
-    itemsToMerge.forEach(item => dispatch(removeMediaItem(item.id)));
-    dispatch(updateMediaItem({
-      itemId: mergedItem.id,
-      updates: {
-        startTime: mergedItem.startTime,
-        duration: mergedItem.duration,
-        track: mergedItem.track
-      }
-    }));
-  };
 
   // Add these states near the beginning of the component, with the other state declarations
   const [audioWaveforms, setAudioWaveforms] = useState<Record<string, number[]>>({});
@@ -1444,6 +1474,99 @@ export default function Timeline() {
     });
   }, [mediaItems, generateAudioWaveform]);
 
+  // Add Marker Details Panel
+  const MarkerDetailsPanel = () => {
+    if (!selectedMarker) return null;
+    
+    const marker = markers.find(m => m.id === selectedMarker);
+    if (!marker) return null;
+    
+    const [markerLabel, setMarkerLabel] = useState(marker.label || '');
+    
+    useEffect(() => {
+      if (marker) {
+        setMarkerLabel(marker.label || '');
+      }
+    }, [marker, selectedMarker]);
+    
+    const handleSaveMarker = () => {
+      setMarkers(markers.map(m => 
+        m.id === selectedMarker 
+          ? { ...m, label: markerLabel || `Marker at ${formatTime(m.time)}` }
+          : m
+      ));
+      showToast('Marker updated', 'success');
+    };
+    
+    return (
+      <div className="absolute right-4 bottom-16 z-20 bg-gray-900 border border-gray-700 rounded-lg shadow-xl p-4 w-80">
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="text-base font-semibold text-white">
+            {marker.type.charAt(0).toUpperCase() + marker.type.slice(1)} Marker
+          </h3>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 text-white hover:bg-gray-800"
+            onClick={() => setSelectedMarker(null)}
+          >
+            ✕
+          </Button>
+        </div>
+        
+        <div className="space-y-4">
+          <div>
+            <Label className="text-sm text-white mb-1 block font-medium">Time</Label>
+            <div className="flex items-center text-sm bg-gray-800 p-2 rounded border border-gray-700 text-white font-mono">
+              {formatTime(marker.time)}
+            </div>
+          </div>
+          
+          <div>
+            <Label className="text-sm text-white mb-1 block font-medium">Label</Label>
+            <Input 
+              value={markerLabel} 
+              onChange={(e) => setMarkerLabel(e.target.value)}
+              className="text-white bg-gray-800 border-gray-700 focus:border-blue-500"
+              placeholder={`Marker at ${formatTime(marker.time)}`}
+            />
+          </div>
+          
+          <div>
+            <Label className="text-sm text-white mb-1 block font-medium">Type</Label>
+            <Select 
+              value={marker.type} 
+              onValueChange={(value: 'scene' | 'cut' | 'transition') => {
+                setMarkers(markers.map(m => 
+                  m.id === selectedMarker ? { ...m, type: value } : m
+                ));
+              }}
+            >
+              <SelectTrigger className="text-white bg-gray-800 border-gray-700">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-gray-900 border-gray-700 text-white">
+                <SelectItem value="scene" className="text-white focus:bg-gray-800 focus:text-white">Scene</SelectItem>
+                <SelectItem value="cut" className="text-white focus:bg-gray-800 focus:text-white">Cut</SelectItem>
+                <SelectItem value="transition" className="text-white focus:bg-gray-800 focus:text-white">Transition</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
+          <div className="flex justify-end pt-2">
+            <Button 
+              size="sm" 
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium"
+              onClick={handleSaveMarker}
+            >
+              Save Changes
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // Render the timeline
   if (!currentVideo.url) {
     return (
@@ -1471,30 +1594,6 @@ export default function Timeline() {
         <Button
           variant="outline"
           size="sm"
-          onClick={handleSplit}
-          disabled={!selectedItem || isPreviewMode}
-          className={cn(
-            "bg-gray-700 hover:bg-gray-600 text-white",
-            (!selectedItem || isPreviewMode) && "opacity-50 cursor-not-allowed"
-          )}
-        >
-          <Scissors className="h-4 w-4 mr-1" /> Split
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleMerge}
-          disabled={selectedItems.length < 2 || isPreviewMode}
-          className={cn(
-            "bg-gray-700 hover:bg-gray-600 text-white",
-            (selectedItems.length < 2 || isPreviewMode) && "opacity-50 cursor-not-allowed"
-          )}
-        >
-          <Combine className="h-4 w-4 mr-1" /> Merge
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
           onClick={handleDelete}
           disabled={!selectedItem || isPreviewMode}
           className={cn(
@@ -1504,11 +1603,46 @@ export default function Timeline() {
         >
           <Trash2 className="h-4 w-4 mr-1" /> Delete
         </Button>
+        
+        {/* Marker Controls */}
+        <div className="h-full border-l border-gray-600 mx-2"></div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => addMarker(currentTime, 'scene')}
+          title="Add Scene Marker"
+          className="bg-blue-600 hover:bg-blue-700 text-white"
+        >
+          <Flag className="h-4 w-4 mr-1" /> Scene
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            if (selectedMarker) {
+              setMarkers(markers.filter(m => m.id !== selectedMarker));
+              setSelectedMarker(null);
+              showToast('Marker removed', 'success');
+            } else {
+              showToast('Select a marker to delete', 'error');
+            }
+          }}
+          disabled={!selectedMarker}
+          className={cn(
+            "bg-gray-700 hover:bg-gray-600 text-white",
+            !selectedMarker && "opacity-50 cursor-not-allowed"
+          )}
+        >
+          <Trash2 className="h-4 w-4 mr-1" /> Delete Marker
+        </Button>
       </div>
       
       <div className="relative flex-grow overflow-auto">
         {renderTimeRuler()}
         {renderPlayhead()}
+        
+        {/* Add markers row */}
+        <TimelineMarkers />
         
         <div className="relative">
           {tracks.map((track, index) => (
@@ -1534,6 +1668,9 @@ export default function Timeline() {
       <div className="p-2 border-t border-gray-700 bg-gray-800 text-xs text-gray-400">
         {formatTime(currentTime)} / {formatTime(currentVideo?.duration || 0)}
       </div>
+      
+      {/* Marker Details Panel */}
+      {selectedMarker && <MarkerDetailsPanel />}
     </div>
   );
 } 
