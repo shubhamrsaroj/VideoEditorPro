@@ -359,7 +359,7 @@ export default function Timeline() {
       video.style.display = 'none';
       video.preload = 'auto'; // Changed from 'metadata' to 'auto'
       video.crossOrigin = 'anonymous';
-      video.muted = true;
+      video.muted = true; // Start muted by default for better user experience
       video.playsInline = true; // Add playsinline for better mobile support
       document.body.appendChild(video);
       
@@ -657,7 +657,49 @@ export default function Timeline() {
     }
   }, [currentTime, currentVideo.duration, dispatch, videoElement]);
 
-  // Update keyboard shortcuts
+  // Enhanced audio muting toggle function
+  const toggleMute = useCallback(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = !videoRef.current.muted;
+      // Force a re-render to update UI
+      setTracks(prev => [...prev]);
+      showToast(videoRef.current.muted ? 'Audio muted' : 'Audio unmuted', 'success');
+    }
+  }, []);
+
+  // Add a state to track muted status
+  const [isMuted, setIsMuted] = useState(true);
+
+  // Add marker creation function - MOVED HERE to fix declaration order
+  const addMarker = useCallback((time: number, type: 'scene' | 'cut' | 'transition' = 'scene') => {
+    const newMarker: Marker = {
+      id: `marker-${Date.now()}`,
+      time,
+      type,
+      label: `Marker ${markers.length + 1}`
+    };
+    setMarkers(prev => [...prev, newMarker].sort((a, b) => a.time - b.time));
+  }, [markers]);
+
+  // Update the muted state when video ref changes
+  useEffect(() => {
+    if (videoRef.current) {
+      setIsMuted(videoRef.current.muted);
+      
+      // Add event listener for mute changes
+      const handleMuteChange = () => {
+        setIsMuted(videoRef.current?.muted || false);
+      };
+      
+      videoRef.current.addEventListener('volumechange', handleMuteChange);
+      
+      return () => {
+        videoRef.current?.removeEventListener('volumechange', handleMuteChange);
+      };
+    }
+  }, [videoRef.current]);
+
+  // Add keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!currentVideo.url) return;
@@ -707,10 +749,16 @@ export default function Timeline() {
         case '3':
           setScale(2); // 2x zoom out
           break;
-        case 'm': // Add marker at current time
+        case 'm': // Toggle mute
           if (!(e.ctrlKey || e.metaKey)) {
             e.preventDefault();
-            addMarker(currentTime, 'scene');
+            if (e.shiftKey) {
+              // Shift+M toggles mute
+              toggleMute();
+            } else {
+              // M adds marker
+              addMarker(currentTime, 'scene');
+            }
           }
           break;
       }
@@ -718,36 +766,83 @@ export default function Timeline() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentVideo.url, currentTime, videoElement, selectedItems, markers, goToNextMarker, goToPrevMarker]);
+  }, [currentVideo.url, currentTime, videoElement, toggleMute, dispatch, addMarker, currentVideo.duration, handleDelete]);
 
-  // Preview mode logic
+  // Preview mode logic with muting consideration
   useEffect(() => {
     let animationFrame: number;
     
     if (isPreviewMode) {
       const startPreview = () => {
         setPreviewPosition(localTrimStart);
+        
+        // Ensure audio state matches muted preference when preview starts
+        if (videoRef.current) {
+          videoRef.current.muted = isMuted;
+          videoRef.current.currentTime = localTrimStart;
+          
+          // Try to play the video with audio according to mute setting
+          const playPromise = videoRef.current.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(error => {
+              console.error("Error playing video:", error);
+              // If autoplay with sound fails, mute and try again
+              if (!isMuted) {
+                videoRef.current!.muted = true;
+                setIsMuted(true);
+                videoRef.current!.play().catch(e => 
+                  console.error("Failed to play even with mute:", e)
+                );
+              }
+            });
+          }
+        }
+        
         const animate = () => {
-          setPreviewPosition(prev => {
-            if (prev >= localTrimEnd) {
+          if (videoRef.current) {
+            const newTime = videoRef.current.currentTime;
+            if (newTime >= localTrimEnd) {
               setIsPreviewMode(false);
-              return localTrimStart;
+              videoRef.current.pause();
+              videoRef.current.currentTime = localTrimStart;
+              dispatch(updateCurrentTime(localTrimStart));
+              return;
             }
-            return prev + FRAME_DURATION;
-          });
+            
+            dispatch(updateCurrentTime(newTime));
+            setPreviewPosition(newTime);
+          } else {
+            setPreviewPosition(prev => {
+              if (prev >= localTrimEnd) {
+                setIsPreviewMode(false);
+                return localTrimStart;
+              }
+              return prev + FRAME_DURATION;
+            });
+          }
+          
           animationFrame = requestAnimationFrame(animate);
         };
         animationFrame = requestAnimationFrame(animate);
       };
       startPreview();
+    } else {
+      // Pause the video when preview mode is turned off
+      if (videoRef.current) {
+        videoRef.current.pause();
+      }
     }
 
     return () => {
       if (animationFrame) {
         cancelAnimationFrame(animationFrame);
       }
+      // Always pause when cleaning up
+      if (videoRef.current) {
+        videoRef.current.pause();
+      }
     };
-  }, [isPreviewMode, localTrimStart, localTrimEnd]);
+  }, [isPreviewMode, localTrimStart, localTrimEnd, isMuted, dispatch]);
 
   // Animation variants
   const segmentVariants = {
@@ -761,17 +856,6 @@ export default function Timeline() {
   // Add frame number display
   const currentFrame = Math.round(currentTime / FRAME_DURATION);
   const totalFrames = Math.round(currentVideo.duration / FRAME_DURATION);
-
-  // Add marker creation function
-  const addMarker = useCallback((time: number, type: 'scene' | 'cut' | 'transition' = 'scene') => {
-    const newMarker: Marker = {
-      id: `marker-${Date.now()}`,
-      time,
-      type,
-      label: `Marker ${markers.length + 1}`
-    };
-    setMarkers(prev => [...prev, newMarker].sort((a, b) => a.time - b.time));
-  }, [markers]);
 
   // Add scene creation function
   const createScene = useCallback((startTime: number, endTime: number) => {
@@ -1346,57 +1430,125 @@ export default function Timeline() {
     );
   };
 
-  // Improve time ruler visibility
+  // Helper function for formatting timeline numbers more compactly
+  const formatTimelineLabel = (time: number, duration: number) => {
+    // For very short videos, show decimal points
+    if (duration <= 10) {
+      return time.toFixed(1);
+    }
+    
+    // For videos under a minute, show seconds
+    if (duration <= 60) {
+      return Math.floor(time).toString();
+    }
+    
+    // For videos between 1-10 minutes
+    if (duration <= 600) {
+      const minutes = Math.floor(time / 60);
+      const seconds = Math.floor(time % 60);
+      if (minutes === 0) {
+        return seconds.toString();
+      }
+      return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+    
+    // For longer videos, just show minutes
+    return `${Math.floor(time / 60)}m`;
+  };
+
+  // Completely revamp the time ruler for better readability
   const renderTimeRuler = () => {
     const duration = currentVideo.duration || 60; // Use actual video duration
+    
+    // Choose appropriate intervals based on duration
+    let majorInterval = 5; // Default to 5 second intervals
+    let showMinorMarkers = true;
+    
+    if (duration <= 10) {
+      majorInterval = 1; // 1 second intervals for very short videos
+    } else if (duration <= 30) {
+      majorInterval = 2; // 2 second intervals for short videos
+    } else if (duration <= 60) {
+      majorInterval = 5; // 5 second intervals for medium videos
+    } else if (duration <= 300) {
+      majorInterval = 30; // 30 second intervals for longer videos
+    } else {
+      majorInterval = 60; // 1 minute intervals for very long videos
+      showMinorMarkers = false;
+    }
+    
+    // Background tick marks (purely decorative)
+    const backgroundTicks = [];
+    const smallTickInterval = duration > 300 ? 5 : 1; // More ticks for shorter videos
+    
+    for (let time = 0; time <= duration; time += smallTickInterval) {
+      const position = (time / duration) * 100;
+      backgroundTicks.push(
+        <div
+          key={`tick-${time}`}
+          className="absolute border-l border-gray-800 h-full opacity-50"
+          style={{ left: `${position}%` }}
+        />
+      );
+    }
+    
+    // Create markers array
     const markers = [];
     
-    // Adjust step size based on duration to avoid too many markers
-    let step = 1; // 1 second intervals for shorter videos
-    if (duration > 60) step = 5; // 5 seconds for medium videos
-    if (duration > 300) step = 30; // 30 seconds for longer videos
-    
-    // Determine major marker frequency based on step size
-    const majorStep = step * 5;
-
-    for (let time = 0; time <= duration; time += step) {
+    // Generate major markers (with labels)
+    for (let time = 0; time <= duration; time += majorInterval) {
       const position = (time / duration) * 100;
-      const isMajorMarker = time % majorStep === 0; // Major marker at appropriate intervals
       
       markers.push(
         <div
-          key={time}
-          className={cn(
-            "absolute border-l transition-colors",
-            isMajorMarker ? "h-4 border-gray-500" : "h-2 border-gray-600"
-          )}
+          key={`major-${time}`}
+          className="absolute border-l border-blue-400 h-4 z-10"
           style={{ left: `${position}%` }}
         >
-          {isMajorMarker && (
-            <span className="absolute top-4 left-1 text-xs font-medium text-gray-400">
-              {formatTime(time)}
-            </span>
-          )}
+          <div className="absolute top-4 left-0 transform -translate-x-1/2 text-xs font-medium text-gray-300 whitespace-nowrap px-1 rounded-sm">
+            {formatTimelineLabel(time, duration)}
+          </div>
         </div>
       );
     }
-
+    
+    // Generate minor markers (no labels) if needed
+    if (showMinorMarkers) {
+      const minorInterval = majorInterval / 2;
+      
+      for (let time = minorInterval; time < duration; time += majorInterval) {
+        const position = (time / duration) * 100;
+        
+        markers.push(
+          <div
+            key={`minor-${time}`}
+            className="absolute border-l border-gray-600 h-2 z-0"
+            style={{ left: `${position}%` }}
+          />
+        );
+      }
+    }
+    
     return (
-      <div className="h-8 relative border-b border-gray-700/50 mb-2 ml-12">
+      <div className="h-8 relative border-b border-gray-700/50 mb-2 ml-12 bg-gray-900/60">
+        {backgroundTicks}
         {markers}
       </div>
     );
   };
 
-  // Update the playhead to use actual video duration
+  // Update the playhead to be more visible
   const renderPlayhead = () => {
     const position = (currentTime / (currentVideo.duration || 60)) * 100;
     return (
       <div
-        className="absolute top-0 bottom-0 w-px bg-red-500 z-10"
+        className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-20 pointer-events-none"
         style={{ left: `${position}%` }}
       >
-        <div className="w-3 h-3 bg-red-500 rounded-full -translate-x-1/2" />
+        <div className="w-4 h-4 bg-red-500 rounded-full absolute top-0 -translate-x-1/2 -translate-y-1/2 shadow-lg" />
+        <div className="absolute top-4 left-0 transform -translate-x-1/2 bg-red-600 text-white text-xs px-1 py-0.5 rounded whitespace-nowrap shadow-md">
+          {formatTime(currentTime)}
+        </div>
       </div>
     );
   };
@@ -1570,7 +1722,7 @@ export default function Timeline() {
   // Render the timeline
   if (!currentVideo.url) {
     return (
-      <div className="h-full flex items-center justify-center">
+      <div className="h-full flex items-center justify-center bg-gray-900">
         <p className="text-gray-400">Upload a video to see timeline</p>
       </div>
     );
@@ -1582,7 +1734,7 @@ export default function Timeline() {
 
   return (
     <div className="h-full flex flex-col bg-gray-900 text-white border-t border-gray-700 relative">
-      <div className="sticky top-0 z-10 p-2 flex space-x-2 bg-gray-800 border-b border-gray-700">
+      <div className="sticky top-0 z-30 p-2 flex space-x-2 bg-gray-800 border-b border-gray-700">
         <Button
           variant="outline"
           size="sm"
@@ -1602,6 +1754,65 @@ export default function Timeline() {
           )}
         >
           <Trash2 className="h-4 w-4 mr-1" /> Delete
+        </Button>
+        
+        {/* Audio Mute Button */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleMute}
+          title="Toggle Audio Mute (Shift+M)"
+          className={cn(
+            "text-white",
+            isMuted 
+              ? "bg-yellow-700 hover:bg-yellow-600" 
+              : "bg-gray-700 hover:bg-gray-600"
+          )}
+        >
+          {isMuted ? (
+            <span className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
+                <line x1="1" y1="1" x2="23" y2="23"></line>
+                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+              </svg>
+              Unmute
+            </span>
+          ) : (
+            <span className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+              </svg>
+              Mute
+            </span>
+          )}
+        </Button>
+        
+        {/* Play/Pause Button */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setIsPreviewMode(!isPreviewMode)}
+          title={isPreviewMode ? "Pause (Spacebar)" : "Play (Spacebar)"}
+          className="bg-green-700 hover:bg-green-600 text-white"
+        >
+          {isPreviewMode ? (
+            <span className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
+                <rect x="6" y="4" width="4" height="16"></rect>
+                <rect x="14" y="4" width="4" height="16"></rect>
+              </svg>
+              Pause
+            </span>
+          ) : (
+            <span className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              Play
+            </span>
+          )}
         </Button>
         
         {/* Marker Controls */}
@@ -1647,7 +1858,7 @@ export default function Timeline() {
         <div className="relative">
           {tracks.map((track, index) => (
             <div key={track.id} className="flex">
-              <div className="w-24 py-2 px-3 bg-gray-800 border-r border-gray-700 flex items-center text-xs whitespace-nowrap">
+              <div className="w-24 py-2 px-3 bg-gray-800 border-r border-gray-700 flex items-center text-xs whitespace-nowrap font-medium">
                 {track.type.charAt(0).toUpperCase() + track.type.slice(1)}
               </div>
               <div className="flex-grow">
@@ -1665,12 +1876,31 @@ export default function Timeline() {
         </div>
       </div>
       
-      <div className="p-2 border-t border-gray-700 bg-gray-800 text-xs text-gray-400">
-        {formatTime(currentTime)} / {formatTime(currentVideo?.duration || 0)}
+      <div className="p-2 border-t border-gray-700 bg-gray-800 text-xs text-gray-300 flex items-center">
+        <span className="font-mono">{formatTime(currentTime)} / {formatTime(currentVideo?.duration || 0)}</span>
+        <span className="ml-4 font-mono">Frame: {currentFrame} / {totalFrames}</span>
+        {isMuted && (
+          <span className="ml-4 text-yellow-400 flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
+              <line x1="1" y1="1" x2="23" y2="23"></line>
+              <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+              <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+            </svg>
+            Audio Muted
+          </span>
+        )}
+        {isPreviewMode && (
+          <span className="ml-4 text-green-400 flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            Playing
+          </span>
+        )}
       </div>
       
       {/* Marker Details Panel */}
       {selectedMarker && <MarkerDetailsPanel />}
     </div>
   );
-} 
+}
