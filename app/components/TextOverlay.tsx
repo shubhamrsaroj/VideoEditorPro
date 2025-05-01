@@ -482,33 +482,7 @@ export function TextOverlay() {
                     />
                   </div>
                 </div>
-                <div>
-                  <Label className="text-xs text-slate-400">Animation</Label>
-                  <Select
-                    value={selectedOverlay.style.animation?.type || 'none'}
-                    onValueChange={(value) => handleUpdateOverlay(selectedOverlay.id, {
-                      style: { 
-                        ...selectedOverlay.style, 
-                        animation: { 
-                          type: value as AnimationType,
-                          duration: selectedOverlay.style.animation?.duration || 1
-                        } 
-                      }
-                    })}
-                  >
-                    <SelectTrigger className="bg-slate-800 border-slate-700">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ANIMATIONS.map((animation) => (
-                        <SelectItem key={animation.value} value={animation.value}>
-                          {animation.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </TabsContent>
+                </TabsContent>
 
               {/* Position Tab */}
               <TabsContent value="position" className="m-0 space-y-3 h-full overflow-y-auto">

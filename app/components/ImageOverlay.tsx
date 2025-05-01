@@ -164,20 +164,20 @@ export default function ImageOverlay() {
               
               <Tabs defaultValue="transform">
                 <TabsList className="grid w-full grid-cols-4 bg-slate-800/50 p-0 rounded-md mb-4">
-                  <TabsTrigger value="transform" className="py-1.5 px-1 flex items-center justify-center gap-1 text-xs">
-                    <Sliders className="w-3 h-3" />
+                  <TabsTrigger value="transform" className="py-2 flex items-center justify-center gap-1">
+                    <Sliders className="w-4 h-4" />
                     <span>Transform</span>
                   </TabsTrigger>
-                  <TabsTrigger value="position" className="py-1.5 px-1 flex items-center justify-center gap-1 text-xs">
-                    <Move className="w-3 h-3" />
+                  <TabsTrigger value="position" className="py-2 flex items-center justify-center gap-1">
+                    <Move className="w-4 h-4" />
                     <span>Position</span>
                   </TabsTrigger>
-                  <TabsTrigger value="filters" className="py-1.5 px-1 flex items-center justify-center gap-1 text-xs">
-                    <Square className="w-3 h-3" />
+                  <TabsTrigger value="filters" className="py-2 flex items-center justify-center gap-1">
+                    <Square className="w-4 h-4" />
                     <span>Filters</span>
                   </TabsTrigger>
-                  <TabsTrigger value="timing" className="py-1.5 px-1 flex items-center justify-center gap-1 text-xs">
-                    <Clock className="w-3 h-3" />
+                  <TabsTrigger value="timing" className="py-2 flex items-center justify-center gap-1">
+                    <Clock className="w-4 h-4" />
                     <span>Timing</span>
                   </TabsTrigger>
                 </TabsList>
