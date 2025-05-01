@@ -74,3 +74,39 @@ export const toast: ToastFunction = Object.assign(createToast, {
   custom: (options: ToastOptions) => createToast(options)
 });
 
+// Add the useToast hook
+export function useToast() {
+  const [state, setState] = React.useState<ToastState>(memoryState);
+
+  React.useEffect(() => {
+    const listener = (newState: ToastState) => {
+      setState(newState);
+    };
+
+    listeners.push(listener);
+    
+    return () => {
+      const index = listeners.indexOf(listener);
+      if (index > -1) {
+        listeners.splice(index, 1);
+      }
+    };
+  }, []);
+
+  return {
+    ...state,
+    toast,
+    dismiss: (toastId?: string) => {
+      memoryState = {
+        toasts: toastId
+          ? memoryState.toasts.filter((t) => t.id !== toastId)
+          : []
+      };
+      
+      listeners.forEach((listener) => {
+        listener(memoryState);
+      });
+    }
+  };
+}
+
