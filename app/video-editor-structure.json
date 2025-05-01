@@ -1,0 +1,226 @@
+{
+  "name": "Video Editor App",
+  "type": "application",
+  "components": {
+    "pages": {
+      "page.tsx": {
+        "type": "page",
+        "components": ["VideoUpload", "Timeline", "TextOverlay", "ImageOverlay", "VideoPreview"],
+        "description": "Main application page with layout and component organization",
+        "functionality": {
+          "layout": "Uses flex layout with three columns: tools sidebar, main content, and properties sidebar",
+          "state": "Manages global video state through Redux",
+          "routing": "Client-side Next.js page with 'use client' directive"
+        }
+      }
+    },
+    "core": {
+      "VideoPreview": {
+        "type": "component",
+        "dependencies": ["ReactPlayer", "Redux Store"],
+        "features": [
+          "Video playback",
+          "Overlay rendering",
+          "Play/pause controls",
+          "Volume control"
+        ],
+        "state": ["isPlaying", "volume", "currentTime"],
+        "codeDetails": {
+          "ReactPlayer": {
+            "purpose": "Handles video playback and controls",
+            "props": {
+              "url": "Video source URL from Redux store",
+              "playing": "Controlled by isPlaying state",
+              "volume": "Controlled by volume state",
+              "onProgress": "Updates timeline position",
+              "onDuration": "Sets video duration in store"
+            }
+          },
+          "overlaySystem": {
+            "implementation": "Uses react-draggable for overlay positioning",
+            "rendering": "Maps through overlays array and renders based on type (text/image)",
+            "positioning": "Calculates absolute positions based on container dimensions"
+          },
+          "controls": {
+            "playPause": "Toggles isPlaying state",
+            "volume": "Uses custom Slider component for volume control",
+            "styling": "Custom dark theme UI components"
+          }
+        }
+      },
+      "Timeline": {
+        "type": "component",
+        "dependencies": ["WaveSurfer", "Redux Store"],
+        "features": [
+          "Audio waveform",
+          "Playback position",
+          "Video duration"
+        ],
+        "codeDetails": {
+          "WaveSurfer": {
+            "purpose": "Generates audio waveform visualization",
+            "configuration": {
+              "backend": "MediaElement for video compatibility",
+              "waveColor": "Custom theme colors",
+              "progressColor": "Indicates played portion"
+            },
+            "synchronization": "Uses video element as media source",
+            "cleanup": "Properly destroys instance on unmount"
+          },
+          "timelineSync": {
+            "seekTo": "Updates position based on currentTime/duration ratio",
+            "validation": "Includes checks for non-finite values"
+          }
+        }
+      },
+      "TextOverlay": {
+        "type": "component",
+        "dependencies": ["Redux Store"],
+        "features": [
+          "Text input",
+          "Font size control",
+          "Color picker",
+          "Position selection"
+        ],
+        "codeDetails": {
+          "textInput": {
+            "handling": "Controlled input with live preview",
+            "validation": "Prevents empty text submission"
+          },
+          "styling": {
+            "fontSize": "Slider control with pixel values",
+            "color": "Color picker with hex values",
+            "position": "Preset positions with x/y coordinates"
+          },
+          "preview": "Shows text with current styling in video context"
+        }
+      },
+      "ImageOverlay": {
+        "type": "component",
+        "dependencies": ["Redux Store"],
+        "features": [
+          "Image upload",
+          "Size control",
+          "Opacity control",
+          "Position selection"
+        ],
+        "codeDetails": {
+          "upload": {
+            "handling": "Uses file input with drag-and-drop",
+            "preview": "Shows uploaded image with current settings",
+            "validation": "Checks file type and size"
+          },
+          "controls": {
+            "size": "Scale transform with percentage",
+            "opacity": "0-1 range with slider",
+            "position": "Preset positions with drag support"
+          }
+        }
+      },
+      "VideoUpload": {
+        "type": "component",
+        "dependencies": ["Redux Store"],
+        "features": [
+          "File upload",
+          "Progress tracking",
+          "File validation"
+        ],
+        "codeDetails": {
+          "upload": {
+            "handling": "Uses react-dropzone for file handling",
+            "validation": "Checks video file types and size",
+            "progress": "Simulated upload progress with interval"
+          },
+          "preview": "Creates object URL for video preview",
+          "cleanup": "Revokes object URLs on unmount"
+        }
+      }
+    },
+    "store": {
+      "videoSlice": {
+        "type": "redux",
+        "state": {
+          "currentVideo": {
+            "url": "string",
+            "duration": "number"
+          },
+          "timeline": {
+            "currentTime": "number"
+          },
+          "overlays": "Array<Overlay>"
+        },
+        "actions": [
+          "setCurrentVideo",
+          "updateCurrentTime",
+          "addOverlay",
+          "updateOverlayPosition",
+          "updateOverlayStyle",
+          "removeOverlay"
+        ],
+        "codeDetails": {
+          "reducers": {
+            "setCurrentVideo": "Updates video URL and duration",
+            "updateCurrentTime": "Updates playback position",
+            "addOverlay": "Adds new overlay with unique ID",
+            "updateOverlayPosition": "Updates x/y coordinates",
+            "updateOverlayStyle": "Updates font, color, or opacity",
+            "removeOverlay": "Filters out overlay by ID"
+          },
+          "state": {
+            "immutability": "Uses Redux Toolkit's createSlice",
+            "updates": "Handled through PayloadAction types"
+          }
+        }
+      }
+    },
+    "providers": {
+      "type": "context",
+      "description": "Redux store provider wrapper",
+      "codeDetails": {
+        "purpose": "Provides Redux store to component tree",
+        "implementation": "Uses Provider from react-redux",
+        "scope": "Wraps entire application"
+      }
+    }
+  },
+  "dataFlow": {
+    "videoUpload": {
+      "source": "VideoUpload",
+      "target": "Redux Store",
+      "action": "setCurrentVideo",
+      "details": "Uploads video and updates store with URL and duration"
+    },
+    "playback": {
+      "source": "VideoPreview",
+      "target": "Redux Store",
+      "action": "updateCurrentTime",
+      "details": "Syncs video playback position with store"
+    },
+    "overlayControl": {
+      "source": ["TextOverlay", "ImageOverlay"],
+      "target": "Redux Store",
+      "actions": ["addOverlay", "updateOverlayPosition", "updateOverlayStyle"],
+      "details": "Manages overlay creation and updates"
+    },
+    "timelineSync": {
+      "source": "Redux Store",
+      "target": ["VideoPreview", "Timeline"],
+      "data": "currentTime",
+      "details": "Keeps video and timeline position synchronized"
+    }
+  },
+  "styling": {
+    "theme": "dark",
+    "colors": {
+      "background": "#111827",
+      "primary": "#3B82F6",
+      "secondary": "#4B5563",
+      "text": "#F3F4F6"
+    },
+    "implementation": {
+      "framework": "Tailwind CSS",
+      "customization": "Uses CSS variables for theme colors",
+      "components": "Shadcn UI components with dark theme"
+    }
+  }
+} 
